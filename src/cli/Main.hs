@@ -17,9 +17,11 @@ import Control.Monad.State
 import Control.Reference as Ref
 
 import GHC
+import SrcLoc
 import HscTypes as GHC
 import Module as GHC
 import GHC.Paths ( libdir )
+import FastString (unpackFS)
 
 import Language.Haskell.Tools.AST
 import Language.Haskell.Tools.PrettyPrint
@@ -94,7 +96,7 @@ data RefactorSessionCommand
   | Exit
   | RefactorCommand RefactorCommand
 
-readSessionCommand :: Monad m => String -> RefactorSession m RefactorSessionCommand
+readSessionCommand :: MonadIO m => String -> RefactorSession m RefactorSessionCommand
 readSessionCommand cmd = case splitOn " " cmd of 
     ["SelectModule", mod] -> return $ LoadModule mod
     ["Exit"] -> return Exit
@@ -114,7 +116,12 @@ performSessionCommand (RefactorCommand cmd)
        st@(RefactorSessionState { _modColls = mods, _actualMod = Just act }) <- get
        let Just collInd = findIndex (\coll -> act `Map.member` mcModules coll) mods
            Just refactoredModule = Map.lookup act $ mcModules $ mods !! collInd
-       res <- lift $ performCommand cmd (askModule act, refactoredModule) (allModulesLoaded st)
+           -- make sure that the filename is the same
+           fileName = case (getRange (refactoredModule ^. annotation&sourceInfo)) of RealSrcSpan sp -> srcSpanFile sp
+           updateFileName fn loc = mkRealSrcLoc fn (srcLocLine loc) (srcLocCol loc)
+           cmd' = cmd { commandPos = mkRealSrcSpan (updateFileName fileName $ realSrcSpanStart $ commandPos cmd) (updateFileName fileName $ realSrcSpanEnd $ commandPos cmd) }
+       
+       res <- lift $ performCommand cmd' (askModule act, refactoredModule) (allModulesLoaded st)
        case res of Left err -> liftIO $ putStrLn err
                    Right resMods -> do 
                      -- update the contents of the files, check how these files can be recompiled

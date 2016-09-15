@@ -160,9 +160,9 @@ performCommand rf mod mods = runRefactor mod mods $ selectCommand rf
 data RefactorCommand = NoRefactor 
                      | OrganizeImports
                      | GenerateExports
-                     | GenerateSignature RealSrcSpan
-                     | RenameDefinition RealSrcSpan String
-                     | ExtractBinding RealSrcSpan String
+                     | GenerateSignature { commandPos :: RealSrcSpan }
+                     | RenameDefinition { commandPos :: RealSrcSpan, commandNewName :: String }
+                     | ExtractBinding { commandPos :: RealSrcSpan, commandNewName :: String }
     deriving Show
 
 readCommand :: String -> String -> RefactorCommand
