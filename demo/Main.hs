@@ -46,11 +46,12 @@ import GhcMonad (GhcMonad(..), Session(..), reflectGhc)
 import HscTypes (SourceError, srcErrorMessages)
 import FastString (unpackFS)
 
-import Control.Reference
+import Control.Reference as Ref
 
 import Language.Haskell.Tools.AST
 import Language.Haskell.Tools.Refactor
 import Language.Haskell.Tools.Refactor.RefactorBase
+import Language.Haskell.Tools.Refactor.GetModules
 import Language.Haskell.Tools.ASTDebug
 import Language.Haskell.Tools.ASTDebug.Instances
 import Language.Haskell.Tools.PrettyPrint
@@ -109,11 +110,11 @@ updateClient dir (ModuleChanged name newContent) = do
       $ lift $ addTarget (Target (TargetModule (mkModuleName name)) True Nothing)
     lift $ load LoadAllTargets
     mod <- lift $ getModSummary (mkModuleName name) >>= parseTyped
-    modify $ refSessMods .- Map.insert (dir, name, NormalHs) mod
+    modify $ modColls & Ref.element 0 .- \mc -> mc { mcModules = Map.insert (mkAbsSrcKey dir name NormalHs) mod (mcModules mc) }
     return Nothing
 updateClient dir (ModuleDeleted name) = do
     lift $ removeTarget (TargetModule (mkModuleName name))
-    modify $ refSessMods .- Map.delete (dir, name, NormalHs)
+    modify $ modColls & Ref.element 0 .- \mc -> mc { mcModules = Map.delete (mkAbsSrcKey dir name NormalHs) (mcModules mc) }
     return Nothing
 updateClient dir (InitialProject modules) = do 
     -- clean the workspace to remove source files from earlier sessions
@@ -125,36 +126,39 @@ updateClient dir (InitialProject modules) = do
     lift $ load LoadAllTargets
     forM (map fst modules) $ \modName -> do
       mod <- lift $ getModSummary (mkModuleName modName) >>= parseTyped
-      modify $ refSessMods .- Map.insert (dir, modName, NormalHs) mod
+      modify $ modColls & Ref.element 0 .- \mc -> mc { mcModules = Map.insert (mkAbsSrcKey dir modName NormalHs) mod (mcModules mc) }
     return Nothing
-updateClient _ (PerformRefactoring "UpdateAST" modName _ _) = do
-    mod <- gets (find ((modName ==) . (\(_,m,_) -> m) . fst) . Map.assocs . (^. refSessMods))
-    case mod of Just (_,m) -> return $ Just $ ASTViewContent $ astDebug m
+updateClient dir (PerformRefactoring "UpdateAST" modName _ _) = do
+    mod <- gets (Map.lookup (mkAbsSrcKey dir modName NormalHs) . mcModules . fromJust . (^? modColls & Ref.element 0))
+    case mod of Just m -> return $ Just $ ASTViewContent $ astDebug m
                 Nothing -> return $ Just $ ErrorMessage "The module is not found"
 updateClient _ (PerformRefactoring "TestErrorLogging" _ _ _) = error "This is a test"
 updateClient dir (PerformRefactoring refact modName selection args) = do
-    mod <- gets (find ((modName ==) . (\(_,m,_) -> m) . fst) . Map.assocs . (^. refSessMods))
-    allModules <- gets (map moduleNameAndContent . Map.assocs . (^. refSessMods))
-    let command = analyzeCommand (toFileName dir modName) refact (selection:args)
-    case mod of Just m -> do res <- lift $ performCommand command (moduleNameAndContent m) allModules 
-                             case res of
-                               Left err -> return $ Just $ ErrorMessage err
-                               Right diff -> do applyChanges diff
-                                                return $ Just $ RefactorChanges (map trfDiff diff)
-                Nothing -> return $ Just $ ErrorMessage "The module is not found"
+    allModules <- gets (map moduleNameAndContent . Map.assocs . mcModules . fromJust . (^? modColls & Ref.element 0))
+    let (otherModules, [mod]) = partition ((== modName) . fst) allModules
+        command = analyzeCommand (toFileName dir modName) refact (selection:args)
+    res <- lift $ performCommand command mod otherModules 
+    case res of
+      Left err -> return $ Just $ ErrorMessage err
+      Right diff -> do applyChanges diff
+                       return $ Just $ RefactorChanges (map trfDiff diff)
   where trfDiff (ContentChanged (name,cont)) = (name, Just (prettyPrint cont))
         trfDiff (ModuleRemoved name) = (name, Nothing)
 
-        applyChanges 
-          = mapM_ $ \case 
-              ContentChanged (n,m) -> do
-                liftIO $ withBinaryFile (toFileName dir n) WriteMode (`hPutStr` prettyPrint m)
-                w <- gets (find ((n ==) . (\(_,m,_) -> m)) . Map.keys . (^. refSessMods))
-                newm <- lift $ (parseTyped =<< loadModule dir n)
-                modify $ refSessMods .- Map.insert (dir, n, NormalHs) newm
-              ModuleRemoved mod -> do
-                liftIO $ removeFile (toFileName dir mod)
-                modify $ refSessMods .- Map.delete (dir, mod, NormalHs)
+        applyChanges chs 
+          = do reload <- forM chs $ \case 
+                 ContentChanged (n,m) -> do
+                   liftIO $ withBinaryFile (toFileName dir n) WriteMode (`hPutStr` prettyPrint m)
+                   ms <- lookupModuleSummary m
+                   return $ Just (n, ms)
+                 ModuleRemoved mod -> do
+                   liftIO $ removeFile (toFileName dir mod)
+                   modify $ modColls & Ref.element 0 .- \mc -> mc { mcModules = Map.delete (mkAbsSrcKey dir mod NormalHs) (mcModules mc) }
+                   return Nothing
+               lift $ load LoadAllTargets
+               forM (catMaybes reload) $ \(n, ms) -> do
+                   newm <- lift $ (parseTyped ms)
+                   modify $ modColls & Ref.element 0 .- \mc -> mc { mcModules = Map.insert (mkAbsSrcKey dir n NormalHs) newm (mcModules mc) }
 
 createFileForModule :: FilePath -> String -> String -> IO ()
 createFileForModule dir name newContent = do
@@ -165,8 +169,8 @@ createFileForModule dir name newContent = do
 removeDirectoryIfPresent :: FilePath -> IO ()
 removeDirectoryIfPresent dir = removeDirectoryRecursive dir `catch` \e -> if isDoesNotExistError e then return () else throwIO e
 
-moduleNameAndContent :: ((String,String,IsBoot), mod) -> (String, mod)
-moduleNameAndContent ((_,name,_), mod) = (name, mod)
+moduleNameAndContent :: (AbsoluteSourceKey, mod) -> (String, mod)
+moduleNameAndContent (abs, mod) = (askModule abs, mod)
 
 dataDirs :: FilePath -> FilePath
 dataDirs wd = wd </> "demoSources"

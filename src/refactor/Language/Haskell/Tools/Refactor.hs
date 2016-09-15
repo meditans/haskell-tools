@@ -100,12 +100,19 @@ initGhcFlags = do
              }
   return ()
 
+askFile :: AbsoluteSourceKey -> FilePath
+askFile (AbsoluteSourceKey wd sk) = sfkFile wd sk
+
+sfkFile :: FilePath -> SourceFileKey -> FilePath
+sfkFile wd (SourceFileKey NormalHs modName) = toFileName wd modName
+sfkFile wd (SourceFileKey IsHsBoot modName) = toBootFileName wd modName
+
 -- | Translates module name and working directory into the name of the file where the given module should be defined
-toFileName :: String -> String -> FilePath
+toFileName :: FilePath -> String -> FilePath
 toFileName workingDir mod = workingDir </> map (\case '.' -> pathSeparator; c -> c) mod ++ ".hs"
 
 -- | Translates module name and working directory into the name of the file where the boot module should be defined
-toBootFileName :: String -> String -> FilePath
+toBootFileName :: FilePath -> String -> FilePath
 toBootFileName workingDir mod = workingDir </> map (\case '.' -> pathSeparator; c -> c) mod ++ ".hs-boot"
 
 -- | Load the summary of a module given by the working directory and module name.
@@ -179,14 +186,25 @@ readSrcLoc fileName s = case splitOn ":" s of
   [line,col] -> mkRealSrcLoc (mkFastString fileName) (read line) (read col)
 
 data RefactorSessionState
-  = RefactorSessionState { _refSessMods :: Map.Map (String, String, IsBoot) (UnnamedModule IdDom)
-                         , _actualMod :: Maybe (String, String, IsBoot)
+  = RefactorSessionState { _modColls :: [ModuleCollection AbsoluteSourceKey (UnnamedModule IdDom)]
+                         , _actualMod :: Maybe AbsoluteSourceKey
                          , _exiting :: Bool
                          }
-
-data IsBoot = NormalHs | IsHsBoot deriving (Eq, Ord, Show)
 
 makeReferences ''RefactorSessionState
 
 initSession :: RefactorSessionState
-initSession = RefactorSessionState Map.empty Nothing False
+initSession = RefactorSessionState [] Nothing False
+
+type RefactorSession = StateT RefactorSessionState
+
+lookupModuleSummary :: UnnamedModule IdDom -> RefactorSession Ghc ModSummary
+lookupModuleSummary m
+  = let modName = semanticsModule $ m ^. semantics
+        isBoot = isBootModule $ m ^. semantics
+     in moduleSummary modName isBoot
+
+moduleSummary :: GHC.Module -> Bool -> RefactorSession Ghc ModSummary
+moduleSummary name boot
+  = do allMods <- lift getModuleGraph
+       return $ fromJust $ find (\ms -> ms_mod ms == name && (ms_hsc_src ms == HsSrcFile) /= boot) allMods 
