@@ -22,6 +22,8 @@ import HscTypes as GHC
 import Module as GHC
 import GHC.Paths ( libdir )
 import FastString (unpackFS)
+import DynFlags
+import Outputable
 
 import Language.Haskell.Tools.AST
 import Language.Haskell.Tools.PrettyPrint
@@ -51,6 +53,8 @@ refactorSession args = runGhc (Just libdir) $
                forM_ (Map.keys mcModules) $ \mod -> 
                   addTarget (Target (TargetModule (mkModuleName (sfkModuleName mod))) True Nothing)
                load LoadAllTargets
+          liftIO $ putStrLn "Compilation done"
+          setSessionDynFlags baseDF
           allMods <- getModuleGraph
           loadedModules <- loadModules emptyPackages allMods
           liftIO $ putStrLn "All modules loaded. Use 'SelectModule module-name' to select a module"
@@ -61,6 +65,7 @@ refactorSession args = runGhc (Just libdir) $
         loadModules mcols summaries = 
           do modules <- forM summaries $ \ms -> 
                           do res <- parseTyped ms
+                             -- TODO: also need to setup flags here:
                              liftIO $ putStrLn ("Loaded module: " ++ (GHC.moduleNameString $ moduleName $ ms_mod ms))
                              return res
              let roots = map getRootDir summaries 
@@ -143,10 +148,11 @@ performSessionCommand (RefactorCommand cmd)
                      let modGroups = map (map snd) $ groupBy ((==) `on` fst) $ sortBy (compare `on` fst) $ catMaybes mss
                          modsWithFlags = zip modGroups (map mcFlagSetup mods)
                      -- compile each module with the correct flags
-                     baseFlags <- lift getSessionDynFlags
-                     forM_ modsWithFlags $ \(mods, flagSetup) -> lift $ do
-                       setSessionDynFlags =<< liftIO (flagSetup baseFlags)
-                       forM_ mods $ \(_, ms) -> load (LoadUpTo (moduleName $ ms_mod ms))
+                     --baseFlags <- lift getSessionDynFlags
+                     --forM_ modsWithFlags $ \(mods, flagSetup) -> lift $ do
+                     --  setSessionDynFlags =<< liftIO (flagSetup baseFlags)
+                     --  forM_ mods $ \(_, ms) -> load (LoadUpTo (moduleName $ ms_mod ms))
+                     lift $ load LoadAllTargets
                      -- transform the compiled modules to our representation and store them in the session
                      forM_ (catMaybes mss) $ \(collInd, (ask, ms)) -> do
                          -- TODO: add target if module is added as a change

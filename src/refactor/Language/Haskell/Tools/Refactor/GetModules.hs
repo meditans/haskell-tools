@@ -117,7 +117,7 @@ modulesFromCabalFile cabal = getModules . flattenPackageDescription <$> readPack
                                       in ModuleCollection (mkModuleCollKey (pkgName $ package pkg) tmc) (hsSourceDirs bi) 
                                                           (Map.fromList $ map ((, ()) . SourceFileKey NormalHs . moduleName) (getModuleNames tmc)) 
                                                           (flagsFromBuildInfo bi)
-                                                          (map (\(Dependency pkgName _) -> LibraryMC (unPackageName pkgName)) (pkgconfigDepends bi))
+                                                          (map (\(Dependency pkgName _) -> LibraryMC (unPackageName pkgName)) (targetBuildDepends bi))
 
         moduleName = concat . intersperse "." . components
 
