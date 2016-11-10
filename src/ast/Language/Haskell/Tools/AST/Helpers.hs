@@ -6,6 +6,9 @@
            , FlexibleInstances
            , UndecidableInstances
            , PatternSynonyms
+           , TypeApplications
+           , MultiParamTypeClasses
+           , ScopedTypeVariables
            #-}
 
 -- | Helper functions for using the AST.
@@ -30,9 +33,12 @@ import Language.Haskell.Tools.AST.Representation.Names
 import Language.Haskell.Tools.AST.References
 import Language.Haskell.Tools.AST.SemaInfoTypes
 import Language.Haskell.Tools.AST.SemaInfoClasses
+import Language.Haskell.Tools.AST.Instances
 
 import Debug.Trace
- 
+
+import Language.Haskell.Tools.AST.ClassyPlate
+
 -- | Does the import declaration import only the explicitly listed elements?
 importIsExact :: Ann UImportDecl dom stage -> Bool
 importIsExact = isJust . (^? importSpec&annJust&importSpecList)  
@@ -62,13 +68,33 @@ typeParams = fromTraversal typeParamsTrav
 semantics :: Simple Lens (Ann elem dom stage) (SemanticInfo dom elem)
 semantics = annotation&semanticInfo
 
+-- classyRef :: ClassyPlate (MonoMatch a) s => (forall m . Monad m => (a -> m a) -> s -> m s) -> Simple Traversal s a
+-- classyRef = reference (morph . execWriter . trav (\a -> tell [a] >> return undefined))
+--                       (\b -> return . (runIdentity . trav (\_ -> Identity b)))
+--                       trav
+--   where trav = classyTraverse monoApp
+
 -- | Get all nodes that contain a given source range
 nodesContaining :: (HasRange (inner dom stage), Biplate (node dom stage) (inner dom stage), SourceInfo stage) 
                 => RealSrcSpan -> Simple Traversal (node dom stage) (inner dom stage)
 nodesContaining rng = biplateRef & filtered (isInside rng) 
 
+class HasRange t => BinaryFind elem dom stage t where
+  onNodes :: Monad m => (Ann elem dom stage -> m (Ann elem dom stage)) -> t -> m t
+
+instance {-# OVERLAPPING #-} SourceInfo stage => BinaryFind elem dom stage (Ann elem dom stage) where
+  onNodes f = f
+
+instance {-# OVERLAPPED #-} SourceInfo stage => BinaryFind e d s (Ann elem dom stage) where
+  onNodes _ = return
+
+
+
+onContained :: forall elem dom stage s m . Monad m => RealSrcSpan -> (Ann elem dom stage -> m (Ann elem dom stage)) -> Ann UModule dom stage -> m (Ann UModule dom stage)
+onContained sp f = selectiveTraverseM @(BinaryFind elem dom stage) (onNodes f) (return . isInside sp)
+
 -- | Return true if the node contains a given range
-isInside :: HasRange (inner dom stage) => RealSrcSpan -> inner dom stage -> Bool
+isInside :: HasRange a => RealSrcSpan -> a -> Bool
 isInside rng nd = case getRange nd of RealSrcSpan sp -> sp `containsSpan` rng
                                       _              -> False
 
