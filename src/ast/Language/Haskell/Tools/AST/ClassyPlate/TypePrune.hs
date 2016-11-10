@@ -5,7 +5,7 @@
            , TypeFamilies
            , UndecidableInstances
            #-}
-module Language.Haskell.Tools.AST.ClassyPlate.TypePrune (ClassIgnoresSubtree, AppSelector, IgnoredFields) where
+module Language.Haskell.Tools.AST.ClassyPlate.TypePrune (ClassIgnoresSubtree, AppSelector, AppPruning, IgnoredFields) where
 
 import GHC.Exts (Constraint)
 import GHC.Generics
@@ -22,6 +22,8 @@ type family ClassIgnoresSubtree (cls :: * -> Constraint) (typ :: *) :: Bool wher
 -- a total type function for a given class, at least for all the types that can possibly
 -- accessed.
 type family AppSelector (c :: * -> Constraint) (a :: *) :: Bool
+
+type family AppPruning (c :: * -> Constraint) (a :: *) :: Bool
 
 -- | This type family sets which fields should not be traversed when trying to generate
 -- automatically pruned versions of classy traversal.

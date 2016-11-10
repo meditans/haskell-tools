@@ -9,7 +9,7 @@ import Data.Generics.Uniplate.Data
 tryItOut moduleName sp = tryRefactor (localRefactoring $ ifToGuards (readSrcSpan (toFileName "." moduleName) sp)) moduleName
 
 ifToGuards :: Domain dom => RealSrcSpan -> LocalRefactoring dom
-ifToGuards sp = return . (nodesContaining sp .- changeBindings)
+ifToGuards sp = return . (onContained sp changeBindings)
 
 changeBindings :: ValueBind dom -> ValueBind dom
 changeBindings (SimpleBind (VarPat name) (UnguardedRhs (If pred thenE elseE)) locals) 

@@ -9,6 +9,9 @@
            , TypeApplications
            , MultiParamTypeClasses
            , ScopedTypeVariables
+           , DataKinds
+           , TypeOperators
+           , AllowAmbiguousTypes
            #-}
 
 -- | Helper functions for using the AST.
@@ -37,6 +40,7 @@ import Language.Haskell.Tools.AST.Instances
 
 import Debug.Trace
 
+import Data.Type.Equality
 import Language.Haskell.Tools.AST.ClassyPlate
 
 -- | Does the import declaration import only the explicitly listed elements?
@@ -79,19 +83,50 @@ nodesContaining :: (HasRange (inner dom stage), Biplate (node dom stage) (inner 
                 => RealSrcSpan -> Simple Traversal (node dom stage) (inner dom stage)
 nodesContaining rng = biplateRef & filtered (isInside rng) 
 
-class HasRange t => BinaryFind elem dom stage t where
-  onNodes :: Monad m => (Ann elem dom stage -> m (Ann elem dom stage)) -> t -> m t
+class HasRange t => BinaryFind a t where
+  onNodes :: (a -> a) -> t -> t
+  onNodesM :: Monad m => (a -> m a) -> t -> m t
 
-instance {-# OVERLAPPING #-} SourceInfo stage => BinaryFind elem dom stage (Ann elem dom stage) where
-  onNodes f = f
+instance (HasRange a, ApplyIf (TEQ s a) s a) => BinaryFind s a where
+  onNodes = applyIf @(TEQ s a)
+  {-# INLINE onNodes #-}
+  onNodesM = applyIfM @(TEQ s a)
+  {-# INLINE onNodesM #-}
 
-instance {-# OVERLAPPED #-} SourceInfo stage => BinaryFind e d s (Ann elem dom stage) where
-  onNodes _ = return
+class ApplyIf (sel :: Bool) x y where
+  applyIf :: (x -> x) -> y -> y
+  applyIfM :: Monad m => (x -> m x) -> y -> m y
 
+instance ApplyIf True x x where
+  applyIf f x = f x
+  {-# INLINE applyIf #-}
+  applyIfM f x = f x
+  {-# INLINE applyIfM #-}
 
+instance ApplyIf False x y where
+  applyIf _ y = y
+  {-# INLINE applyIf #-}
+  applyIfM _ y = return y
+  {-# INLINE applyIfM #-}
 
-onContained :: forall elem dom stage s m . Monad m => RealSrcSpan -> (Ann elem dom stage -> m (Ann elem dom stage)) -> Ann UModule dom stage -> m (Ann UModule dom stage)
-onContained sp f = selectiveTraverseM @(BinaryFind elem dom stage) (onNodes f) (return . isInside sp)
+type family TEQ a b :: Bool where
+  TEQ a a = True
+  TEQ a b = False
+
+type instance AppSelector (BinaryFind a) t = BinaryFindSelector t
+
+type family BinaryFindSelector t :: Bool where
+  BinaryFindSelector (Ann elem dom stage) = True
+  BinaryFindSelector other = False
+
+onContained :: forall root elem dom stage s . (SourceInfo stage, ClassyPlate (BinaryFind (Ann elem dom stage)) (Ann root dom stage)) 
+            => RealSrcSpan -> (Ann elem dom stage -> Ann elem dom stage) -> Ann root dom stage -> Ann root dom stage
+onContained sp f = selectiveTraverse @(BinaryFind (Ann elem dom stage)) (onNodes f) (\e -> trace (show $ getRange e) $ isContained sp e || isInside sp e)
+
+onContainedM :: forall root elem dom stage s m . (Monad m, SourceInfo stage, ClassyPlate (BinaryFind (Ann elem dom stage)) (Ann root dom stage)) 
+             => RealSrcSpan -> (Ann elem dom stage -> m (Ann elem dom stage)) -> Ann root dom stage -> m (Ann root dom stage)
+onContainedM sp f = selectiveTraverseM @(BinaryFind (Ann elem dom stage)) (onNodesM f) (\e -> trace (show $ getRange e) $ return $ isContained sp e || isInside sp e)
+
 
 -- | Return true if the node contains a given range
 isInside :: HasRange a => RealSrcSpan -> a -> Bool
@@ -104,7 +139,7 @@ nodesContained :: (HasRange (inner dom stage), Biplate (node dom stage) (inner d
 nodesContained rng = biplateRef & filtered (isContained rng) 
 
 -- | Return true if the node contains a given range
-isContained :: HasRange (inner dom stage) => RealSrcSpan -> inner dom stage -> Bool
+isContained :: HasRange a => RealSrcSpan -> a -> Bool
 isContained rng nd = case getRange nd of RealSrcSpan sp -> rng `containsSpan` sp
                                          _              -> False
 
