@@ -9,7 +9,7 @@
            #-}
 module Language.Haskell.Tools.AST.Instances.ClassyPlate where
 
-import Language.Haskell.Tools.AST.ClassyPlate
+import Data.Generics.ClassyPlate
 
 import Language.Haskell.Tools.AST.Representation.Modules
 import Language.Haskell.Tools.AST.Representation.TH

@@ -41,7 +41,7 @@ import Language.Haskell.Tools.AST.Instances
 import Debug.Trace
 
 import Data.Type.Equality
-import Language.Haskell.Tools.AST.ClassyPlate
+import Data.Generics.ClassyPlate
 
 -- | Does the import declaration import only the explicitly listed elements?
 importIsExact :: Ann UImportDecl dom stage -> Bool
@@ -121,11 +121,11 @@ type family BinaryFindSelector t :: Bool where
 
 onContained :: forall root elem dom stage s . (SourceInfo stage, ClassyPlate (BinaryFind (Ann elem dom stage)) (Ann root dom stage)) 
             => RealSrcSpan -> (Ann elem dom stage -> Ann elem dom stage) -> Ann root dom stage -> Ann root dom stage
-onContained sp f = selectiveTraverse @(BinaryFind (Ann elem dom stage)) (onNodes f) (\e -> trace (show $ getRange e) $ isContained sp e || isInside sp e)
+onContained sp f = selectiveTraverse @(BinaryFind (Ann elem dom stage)) (onNodes f) (\e -> isContained sp e || isInside sp e)
 
 onContainedM :: forall root elem dom stage s m . (Monad m, SourceInfo stage, ClassyPlate (BinaryFind (Ann elem dom stage)) (Ann root dom stage)) 
              => RealSrcSpan -> (Ann elem dom stage -> m (Ann elem dom stage)) -> Ann root dom stage -> m (Ann root dom stage)
-onContainedM sp f = selectiveTraverseM @(BinaryFind (Ann elem dom stage)) (onNodesM f) (\e -> trace (show $ getRange e) $ return $ isContained sp e || isInside sp e)
+onContainedM sp f = selectiveTraverseM @(BinaryFind (Ann elem dom stage)) (onNodesM f) (\e -> return $ isContained sp e || isInside sp e)
 
 
 -- | Return true if the node contains a given range

@@ -15,3 +15,4 @@ packages:
 extra-deps: 
   - references-0.3.2.0
   - instance-control-0.1.1.1
+  - classyplate-0.1.0.0
